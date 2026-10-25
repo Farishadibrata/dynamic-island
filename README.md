@@ -52,3 +52,7 @@ The app asks only for what a feature needs, when you use it:
 - The build is not code-signed, so macOS treats every rebuild as a new app and Accessibility has to be granted again.
 - Following desktop swipes uses private macOS space calls (`CGSAddWindowsToSpaces` and related). They may change in a future macOS release; if they go missing the island stays on its current desktop.
 - macOS does not give apps audio levels, so the level bars are animated by a clock and do not react to the sound.
+
+## License
+
+[MIT](LICENSE). Fork it, change it, ship it. It is vibe-coded, so expect rough edges.
