@@ -42,6 +42,12 @@ final class WidgetHub {
     let discord = DiscordMute()
     let status = StatusMonitor()
 
+    func setAlertHandler(_ handler: @escaping (IslandAlert) -> Void) {
+        battery.onAlert = handler
+        status.onAlert = handler
+        timer.onAlert = handler
+    }
+
     func start() {
         agenda.start()
         battery.start()
@@ -167,13 +173,17 @@ final class FocusTimer: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var remaining: TimeInterval = 0
 
+    var onAlert: ((IslandAlert) -> Void)?
+
     private var endDate: Date?
     private var timer: Timer?
+    private var sessionMinutes = 0
 
     /// Idle starts a fresh countdown of `minutes`; running pauses; paused resumes.
     func toggle(minutes: Int) {
         switch phase {
         case .idle:
+            sessionMinutes = minutes
             remaining = TimeInterval(minutes * 60)
             resume()
         case .running:
@@ -216,6 +226,8 @@ final class FocusTimer: ObservableObject {
         if left <= 0 {
             reset()
             NSSound.beep()
+            onAlert?(IslandAlert(kind: .timer, symbol: "timer", title: "Focus done",
+                                 subtitle: "\(sessionMinutes) min", tint: .orange, duration: 5))
         } else {
             remaining = left
         }
@@ -229,11 +241,29 @@ final class BatteryMonitor: ObservableObject {
     @Published private(set) var isCharging = false
     @Published private(set) var isOnPower = false
 
+    var onAlert: ((IslandAlert) -> Void)?
+
     private var timer: Timer?
+    private var powerSource: CFRunLoopSource?
+    private var lastOnPower: Bool?
+    private var lastLevel: Int?
 
     func start() {
         guard timer == nil else { return }
         sample()
+
+        // The system says when the charger goes in or out, so that is shown at once; the
+        // timer below only keeps the percentage fresh.
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        if let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let monitor = Unmanaged<BatteryMonitor>.fromOpaque(context).takeUnretainedValue()
+            MainActor.assumeIsolated { monitor.sample() }
+        }, context)?.takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            powerSource = source
+        }
+
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }
@@ -259,9 +289,36 @@ final class BatteryMonitor: ObservableObject {
             level = Int((Double(current) / Double(maximum) * 100).rounded())
             isCharging = description[kIOPSIsChargingKey] as? Bool ?? false
             isOnPower = description[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
+            announceChanges()
             return
         }
         level = nil
+    }
+
+    /// Plugging in or out, dropping to 20% or 10% on battery, and reaching full.
+    private func announceChanges() {
+        defer {
+            lastOnPower = isOnPower
+            lastLevel = level
+        }
+        guard let level, let lastOnPower, let lastLevel else { return }
+
+        if isOnPower != lastOnPower {
+            onAlert?(isOnPower
+                ? IslandAlert(kind: .battery, symbol: "bolt.fill", title: "Charging",
+                              subtitle: "\(level)%", level: Double(level) / 100, tint: .green)
+                : IslandAlert(kind: .battery, symbol: BatteryGlyph.symbol(level: level, charging: false),
+                              title: "On battery", subtitle: "\(level)%", level: Double(level) / 100))
+        } else if !isOnPower, let threshold = [10, 20].first(where: { level <= $0 && lastLevel > $0 }) {
+            onAlert?(IslandAlert(kind: .battery,
+                                 symbol: threshold == 10 ? "battery.0" : "battery.25",
+                                 title: "Low battery", subtitle: "\(level)%",
+                                 level: Double(level) / 100,
+                                 tint: threshold == 10 ? .red : .orange, duration: 5))
+        } else if isOnPower, level == 100, lastLevel < 100 {
+            onAlert?(IslandAlert(kind: .battery, symbol: "battery.100", title: "Fully charged",
+                                 subtitle: "100%", level: 1, tint: .green))
+        }
     }
 }
 
@@ -367,8 +424,14 @@ final class StatusMonitor: ObservableObject {
     @Published private(set) var volume = 0.0
     @Published private(set) var isMuted = false
 
+    var onAlert: ((IslandAlert) -> Void)?
+
     private var timer: Timer?
+    private var soundTimer: Timer?
     private var tick = 0
+    private var knownDevices: Set<String>?
+    private var hasSoundBaseline = false
+    private var lastBrightness: Double?
 
     func start() {
         guard timer == nil else { return }
@@ -378,6 +441,16 @@ final class StatusMonitor: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+
+        // Volume is watched much faster than the rest, so the key presses show as they happen.
+        let soundTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.sampleSound()
+                self?.sampleBrightness()
+            }
+        }
+        RunLoop.main.add(soundTimer, forMode: .common)
+        self.soundTimer = soundTimer
     }
 
     private func sample() {
@@ -388,10 +461,8 @@ final class StatusMonitor: ObservableObject {
         wifiStrength = rssi == 0 ? 0 : min(max(Double(rssi + 90) / 50, 0.05), 1)
 
         // Slower than the rest: it is a subprocess, and Bluetooth changes rarely.
-        if tick % 4 == 0 { sampleBluetooth() }
+        if tick % 2 == 0 { sampleBluetooth() }
         tick += 1
-
-        sampleSound()
     }
 
     /// `IOBluetooth` aborts a process that has no Bluetooth permission, so the state is
@@ -403,12 +474,31 @@ final class StatusMonitor: ObservableObject {
         }
     }
 
-    private func apply(_ reading: (isOn: Bool, connected: Int)) {
+    private func apply(_ reading: (isOn: Bool, devices: [String])) {
         bluetoothOn = reading.isOn
-        bluetoothConnected = reading.connected
+        bluetoothConnected = reading.devices.count
+
+        let now = Set(reading.devices)
+        defer { knownDevices = now }
+        // The first reading is the starting point, not news.
+        guard let known = knownDevices else { return }
+        for name in reading.devices where !known.contains(name) {
+            onAlert?(IslandAlert(kind: .bluetooth, symbol: Self.symbol(forDevice: name),
+                                 title: name, subtitle: "Connected", tint: .blue))
+        }
     }
 
-    private nonisolated static func readBluetooth() -> (isOn: Bool, connected: Int) {
+    private static func symbol(forDevice name: String) -> String {
+        let lowered = name.lowercased()
+        if lowered.contains("keyboard") { return "keyboard" }
+        if lowered.contains("mouse") || lowered.contains("trackpad") { return "computermouse.fill" }
+        if lowered.contains("pods") || lowered.contains("buds") || lowered.contains("head")
+            || lowered.contains("wh-") || lowered.contains("beats") { return "headphones" }
+        if lowered.contains("speaker") { return "hifispeaker.fill" }
+        return "dot.radiowaves.left.and.right"
+    }
+
+    private nonisolated static func readBluetooth() -> (isOn: Bool, devices: [String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
         process.arguments = ["SPBluetoothDataType", "-json"]
@@ -416,18 +506,52 @@ final class StatusMonitor: ObservableObject {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
-        guard (try? process.run()) != nil else { return (false, 0) }
+        guard (try? process.run()) != nil else { return (false, []) }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entry = (root["SPBluetoothDataType"] as? [[String: Any]])?.first else {
-            return (false, 0)
+            return (false, [])
         }
         let properties = entry["controller_properties"] as? [String: Any]
         let isOn = properties?["controller_state"] as? String == "attrib_on"
-        let connected = (entry["device_connected"] as? [Any])?.count ?? 0
-        return (isOn, connected)
+        // Each connected device is a one-key dictionary named after the device.
+        let devices = (entry["device_connected"] as? [[String: Any]] ?? []).flatMap(\.keys).sorted()
+        return (isOn, devices)
+    }
+
+    /// `DisplayServices` is private, so it is looked up at run time; without it brightness
+    /// alerts simply never appear.
+    private typealias BrightnessReader = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
+    private static let readBrightness: BrightnessReader? = {
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
+                                  RTLD_LAZY),
+              let symbol = dlsym(handle, "DisplayServicesGetBrightness") else { return nil }
+        return unsafeBitCast(symbol, to: BrightnessReader.self)
+    }()
+
+    private func sampleBrightness() {
+        guard let read = Self.readBrightness else { return }
+
+        // The built-in panel, which is the one the brightness keys move.
+        var displays = [CGDirectDisplayID](repeating: 0, count: 8)
+        var count: UInt32 = 0
+        CGGetOnlineDisplayList(8, &displays, &count)
+        let panel = displays.prefix(Int(count)).first { CGDisplayIsBuiltin($0) != 0 } ?? CGMainDisplayID()
+
+        var value: Float = 0
+        guard read(panel, &value) == 0 else { return }
+
+        let level = Double(value)
+        defer { lastBrightness = level }
+        guard let previous = lastBrightness, abs(level - previous) > 0.004 else { return }
+
+        onAlert?(IslandAlert(kind: .brightness,
+                             symbol: level < 0.35 ? "sun.min.fill" : "sun.max.fill",
+                             title: "Brightness",
+                             subtitle: "\(Int((level * 100).rounded()))%",
+                             level: level, tint: .yellow, duration: 1.6))
     }
 
     private func sampleSound() {
@@ -442,6 +566,7 @@ final class StatusMonitor: ObservableObject {
               device != kAudioObjectUnknown else { return }
 
         // The system's own volume control ('vmvc'), which is what the keys and menu bar move.
+        let previousVolume = volume, previousMuted = isMuted
         var level = Float32(0)
         size = UInt32(MemoryLayout<Float32>.size)
         address = AudioObjectPropertyAddress(mSelector: 0x766D_7663,
@@ -459,5 +584,17 @@ final class StatusMonitor: ObservableObject {
         if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &muted) == noErr {
             isMuted = muted != 0
         }
+
+        defer { hasSoundBaseline = true }
+        guard hasSoundBaseline,
+              abs(volume - previousVolume) > 0.004 || isMuted != previousMuted else { return }
+
+        let silent = isMuted || volume <= 0.001
+        let symbol = silent ? "speaker.slash.fill" : (volume < 0.34 ? "speaker.wave.1.fill"
+                     : (volume < 0.67 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"))
+        onAlert?(IslandAlert(kind: .volume, symbol: symbol,
+                             title: isMuted ? "Muted" : "Volume",
+                             subtitle: isMuted ? nil : "\(Int((volume * 100).rounded()))%",
+                             level: isMuted ? 0 : volume, duration: 1.6))
     }
 }

@@ -35,6 +35,7 @@ final class IslandController {
     private var hoverTimer: Timer?
     private var nowPlayingObserver: AnyCancellable?
     private var announceTimer: Timer?
+    private var alertTimer: Timer?
     private var lastTrackID: String?
 
     /// The first track seen after launch is not a change, so it does not announce itself.
@@ -74,6 +75,11 @@ final class IslandController {
         if let initial { apply(initial) }
         first.orderFrontRegardless()
 
+        widgets.setAlertHandler { [weak self] alert in self?.show(alert) }
+        settings.onPreviewAlert = { [weak self] in
+            self?.show(IslandAlert(kind: .battery, symbol: "bolt.fill", title: "Charging",
+                                   subtitle: "80%", tint: .green), force: true)
+        }
         syncPositionTracking()
         settings.onChange = { [weak self] in
             self?.syncPositionTracking()
@@ -195,8 +201,34 @@ final class IslandController {
         }
     }
 
+    /// Opens the island for a moment to show `alert`. It stays out of the way of an island
+    /// the user opened, and a volume change updates the one already showing.
+    private func show(_ alert: IslandAlert, force: Bool = false) {
+        guard force || settings.alerts.contains(alert.kind), !state.isExpanded else { return }
+        if alert.kind.isMinor, let showing = state.alert, !showing.kind.isMinor { return }
+
+        state.alert = alert
+        relayout()
+
+        alertTimer?.invalidate()
+        let timer = Timer(timeInterval: alert.duration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.endAlert() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        alertTimer = timer
+    }
+
+    private func endAlert() {
+        alertTimer?.invalidate()
+        alertTimer = nil
+        guard state.alert != nil else { return }
+        state.alert = nil
+        relayout()
+    }
+
     private func expand() {
         guard !state.isExpanded else { return }
+        endAlert()
         announceTimer?.invalidate()
         announceTimer = nil
         state.isAnnouncing = false
@@ -329,9 +361,14 @@ final class IslandController {
         // Without a glow nothing needs to spill, so the panel hugs the shape.
         let margin: CGFloat = settings.glowEffect == .off ? 0 : glowMargin
 
-        let shapeWidth = max(settings.sizePreset.expandedWidth,
-                             notch.width + settings.leftWing.collapsedWidth
-                                 + settings.rightWing.collapsedWidth)
+        let collapsedPillWidth = notch.width + settings.leftWing.collapsedWidth
+            + settings.rightWing.collapsedWidth
+        let fullWidth = max(settings.sizePreset.expandedWidth, collapsedPillWidth)
+        // An alert is a smaller message than the full island, so it gets a narrower body.
+        let showsAlert = state.alert != nil && !state.isExpanded
+        let shapeWidth = showsAlert
+            ? max(notch.width + (IslandMetrics.alertWingWidth + IslandMetrics.alertNotchGap) * 2, collapsedPillWidth)
+            : fullWidth
         // Three bodies: the announcement shows the media block alone, the island the user
         // opened shows it with the tray beneath, and with nothing playing the preset rules.
         let hasWidgets = settings.widgetLeft != .none || settings.widgetRight != .none
@@ -343,6 +380,8 @@ final class IslandController {
             bodyHeight = IslandMetrics.expandedBodyHeight(hasMedia: hasNowPlaying, hasWidgets: hasWidgets,
                                                          hasStatus: hasStatus, usageRows: usageRows,
                                                          showsTimes: showsTimes)
+        } else if showsAlert {
+            bodyHeight = IslandMetrics.alertBodyHeight
         } else if state.isAnnouncing {
             bodyHeight = IslandMetrics.announcementBodyHeight(showsTimes: showsTimes)
         } else {
@@ -362,9 +401,10 @@ final class IslandController {
             + IslandMetrics.expandedBodyHeight(hasMedia: true, hasWidgets: hasWidgets,
                                                          hasStatus: hasStatus, usageRows: usageRows,
                                                          showsTimes: showsTimes)
-        let panel = CGRect(x: expandedShape.minX - margin,
+        // The panel is sized from the full width, so an alert never resizes the window.
+        let panel = CGRect(x: notch.midX - fullWidth / 2 - margin,
                            y: top - envelopeHeight - margin,
-                           width: expandedShape.width + margin * 2,
+                           width: fullWidth + margin * 2,
                            height: envelopeHeight + margin)
 
         // The collapsed pill is the notch widened by whichever side slots are in use.

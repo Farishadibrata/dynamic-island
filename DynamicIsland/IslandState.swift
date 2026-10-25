@@ -8,6 +8,8 @@ final class IslandState: ObservableObject {
     /// without the tray row, so a song change announces itself rather than looking like the
     /// island the user opened.
     @Published var isAnnouncing = false
+    /// A transient message, such as the charger being plugged in.
+    @Published var alert: IslandAlert?
     @Published var hasNotch = false
     /// The physical notch. The collapsed pill is this widened by its side slots, so the
     /// two are no longer the same rect.
@@ -17,5 +19,5 @@ final class IslandState: ObservableObject {
     @Published var collapsedCornerRadius: CGFloat = 10
 
     /// Either kind of opening draws the island body rather than the notch pill.
-    var isOpen: Bool { isExpanded || isAnnouncing }
+    var isOpen: Bool { isExpanded || isAnnouncing || alert != nil }
 }

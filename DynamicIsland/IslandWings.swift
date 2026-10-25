@@ -5,6 +5,7 @@ struct IslandWing: View {
     let item: IslandWingItem
     @ObservedObject var nowPlaying: NowPlayingService
     @ObservedObject var stats: SystemStats
+    @ObservedObject var battery: BatteryMonitor
     /// False while the island is open and the slot is hidden, so the bars stop costing frames.
     let isActive: Bool
 
@@ -21,6 +22,8 @@ struct IslandWing: View {
                 reading(symbol: "memorychip", text: gigabytes(stats.memoryUsed))
             case .disk:
                 reading(symbol: "internaldrive", text: percent(stats.diskUsed))
+            case .battery:
+                batteryReading
             }
         }
         .frame(height: 20)
@@ -49,6 +52,22 @@ struct IslandWing: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+
+    /// Charge with a symbol that follows it; green while charging, red when nearly empty.
+    private var batteryReading: some View {
+        let level = battery.level
+        let tint: Color = battery.isCharging ? .green : ((level ?? 100) <= 10 ? .red : .white.opacity(0.8))
+        return HStack(spacing: 3) {
+            Image(systemName: level.map { BatteryGlyph.symbol(level: $0, charging: battery.isCharging) }
+                  ?? "powerplug")
+                .font(.system(size: 10, weight: .medium))
+            Text(level.map { "\($0)%" } ?? "AC")
+                .font(.system(size: 9, weight: .semibold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .lineLimit(1)
     }
 
     private func reading(symbol: String, text: String) -> some View {

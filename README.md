@@ -14,7 +14,8 @@ A Dynamic Island for the MacBook notch. It sits in the notch as a small pill, an
 - **Widgets** in the expanded island, two slots you choose: Calendar, Reminders, Focus timer, Clock, Battery, Discord mute.
 - **Status icons** for battery, Wi-Fi, Bluetooth and sound. Click one to open its System Settings pane.
 - **System usage** rows for CPU, memory and disk (space left of the whole).
-- **Small state slots** either side of the notch: now playing, CPU, memory or disk.
+- **Small state slots** either side of the notch: now playing, CPU, memory, disk or battery.
+- **Live alerts**: the island widens for a moment when the charger goes in or out, the battery runs low or is full, the volume changes, a Bluetooth device connects, or the focus timer ends. Each can be switched off.
 - Follows a three-finger swipe between desktops.
 
 ## Settings
@@ -49,7 +50,7 @@ The app asks only for what a feature needs, when you use it:
 
 ## Notes
 
-- The build is not code-signed, so macOS treats every rebuild as a new app and Accessibility has to be granted again.
+- Builds are ad-hoc signed by default, so macOS treats every rebuild as a new app and Accessibility has to be granted again. To keep it, pick your own team under Signing & Capabilities in Xcode (a free Apple ID works).
 - Following desktop swipes uses private macOS space calls (`CGSAddWindowsToSpaces` and related). They may change in a future macOS release; if they go missing the island stays on its current desktop.
 - macOS does not give apps audio levels, so the level bars are animated by a clock and do not react to the sound.
 

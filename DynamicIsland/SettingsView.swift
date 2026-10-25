@@ -110,6 +110,16 @@ struct SettingsView: View {
                 row("Right") { pick(IslandWingItem.allCases, selection: $settings.rightWing) { $0.title } }
             }
 
+            card("Live alerts", symbol: "bell.badge") {
+                checkboxes(AlertKind.allCases, binding: alertBinding) { $0.title }
+                HStack {
+                    hint("Volume and brightness are off by default, since macOS shows its own overlay for them.")
+                    Spacer(minLength: 8)
+                    Button("Preview") { settings.onPreviewAlert?() }
+                        .controlSize(.small)
+                }
+            }
+
             card("Behavior", symbol: "cursorarrow.motionlines") {
                 toggleRow("Expand on hover", isOn: $settings.expandOnHover)
                 toggleRow("Show on all Spaces", isOn: $settings.showOnAllSpaces)
@@ -263,13 +273,13 @@ struct SettingsView: View {
     private func checkboxes<Value: Hashable & Identifiable>(_ values: [Value],
                                                             binding: @escaping (Value) -> Binding<Bool>,
                                                             title: @escaping (Value) -> String) -> some View {
-        HStack(spacing: 16) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), alignment: .leading)],
+                  alignment: .leading, spacing: 8) {
             ForEach(values) { value in
                 Toggle(title(value), isOn: binding(value))
                     .toggleStyle(.checkbox)
                     .font(.system(size: 13))
             }
-            Spacer(minLength: 0)
         }
     }
 
@@ -301,6 +311,15 @@ struct SettingsView: View {
             get: { settings.statusIcons.contains(icon) },
             set: { isOn in
                 if isOn { settings.statusIcons.insert(icon) } else { settings.statusIcons.remove(icon) }
+            }
+        )
+    }
+
+    private func alertBinding(_ kind: AlertKind) -> Binding<Bool> {
+        Binding(
+            get: { settings.alerts.contains(kind) },
+            set: { isOn in
+                if isOn { settings.alerts.insert(kind) } else { settings.alerts.remove(kind) }
             }
         )
     }

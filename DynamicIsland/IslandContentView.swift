@@ -9,6 +9,11 @@ enum IslandMetrics {
     static let widgetHeight: CGFloat = 54
     static let widgetSpacing: CGFloat = 8
     static let statusHeight: CGFloat = 44
+    /// Width of the message either side of the notch.
+    static let alertWingWidth: CGFloat = 76
+    /// Clear space between the notch edge and the icon or message, which the notch's
+    /// curved corners would otherwise clip.
+    static let alertNotchGap: CGFloat = 14
     static let usageRowHeight: CGFloat = 16
     static let usageRowSpacing: CGFloat = 7
     static let blockSpacing: CGFloat = 8
@@ -42,6 +47,9 @@ enum IslandMetrics {
     }
 
     /// Body height for a song change, which shows the media block with no tray row.
+    /// The alert lives in the notch's own band, so it needs no body below it.
+    static let alertBodyHeight: CGFloat = 0
+
     static func announcementBodyHeight(showsTimes: Bool) -> CGFloat {
         contentTopPadding + mediaBlockHeight(showsTimes: showsTimes) + contentBottomPadding
     }
@@ -61,8 +69,11 @@ struct IslandContentView: View {
         state.isOpen ? state.expandedSize : state.collapsedSize
     }
 
+    private var showsAlert: Bool { state.alert != nil && !state.isExpanded }
+
     private var cornerRadius: CGFloat {
-        state.isOpen ? 26 : state.collapsedCornerRadius
+        // An alert is only as tall as the notch, so it keeps the pill's curve.
+        state.isOpen && !showsAlert ? 26 : state.collapsedCornerRadius
     }
 
     /// The top corners are always square: the island is flush with the screen edge, so it
@@ -150,14 +161,28 @@ struct IslandContentView: View {
     }
 
     private func wing(_ item: IslandWingItem) -> some View {
-        IslandWing(item: item, nowPlaying: nowPlaying, stats: stats, isActive: !state.isOpen)
+        IslandWing(item: item, nowPlaying: nowPlaying, stats: stats,
+                   battery: widgets.battery, isActive: !state.isOpen)
             .frame(width: item.collapsedWidth)
     }
 
     /// The running track, when there is one, with the widget row underneath it. A song
     /// change shows the media block on its own; the widgets belong to the island the user
     /// opened.
+    /// An alert is a single row in the notch's own band, icon on one side and message on the
+    /// other; anything else is the body below the notch.
+    @ViewBuilder
     private var content: some View {
+        if let alert = state.alert, !state.isExpanded {
+            IslandAlertView(alert: alert, notchWidth: state.notchSize.width)
+                .frame(height: state.notchSize.height)
+                .frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            mediaBody
+        }
+    }
+
+    private var mediaBody: some View {
         VStack(spacing: IslandMetrics.blockSpacing) {
             if let track = nowPlaying.track, state.isOpen {
                 NowPlayingView(track: track,

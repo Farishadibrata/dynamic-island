@@ -38,6 +38,7 @@ enum IslandWingItem: String, CaseIterable, Identifiable {
     case cpu
     case memory
     case disk
+    case battery
 
     var id: String { rawValue }
 
@@ -48,6 +49,7 @@ enum IslandWingItem: String, CaseIterable, Identifiable {
         case .cpu: "CPU"
         case .memory: "Memory"
         case .disk: "Disk"
+        case .battery: "Battery"
         }
     }
 
@@ -57,6 +59,7 @@ enum IslandWingItem: String, CaseIterable, Identifiable {
         switch self {
         case .none: 0
         case .nowPlaying: 56
+        case .battery: 50
         default: 44
         }
     }
@@ -120,6 +123,7 @@ final class AppSettings: ObservableObject {
         static let systemMetrics = "systemMetrics"
         static let statusIcons = "statusIcons"
         static let glowFollowsMedia = "glowFollowsMedia"
+        static let alertsOff = "alertsOff"
         static let discordShortcut = "discordMuteShortcut"
         static let glowEffect = "glowEffect"
         static let glowIntensity = "glowIntensity"
@@ -185,6 +189,18 @@ final class AppSettings: ObservableObject {
     var activeSystemMetrics: [SystemMetric] {
         SystemMetric.allCases.filter(systemMetrics.contains)
     }
+
+    /// The events the island announces. Stored as the ones switched off, so a kind added
+    /// later starts on instead of silently missing from an older saved list.
+    @Published var alerts: Set<AlertKind> {
+        didSet {
+            let off = AlertKind.allCases.filter { !alerts.contains($0) }
+            defaults.set(off.map(\.rawValue), forKey: Key.alertsOff)
+        }
+    }
+
+    /// Set by the island, so Settings can show what an alert looks like.
+    var onPreviewAlert: (@MainActor () -> Void)?
 
     /// Tints the glow with the colours of the cover while music plays.
     @Published var glowFollowsMedia: Bool {
@@ -293,6 +309,9 @@ final class AppSettings: ObservableObject {
             .flatMap(IslandWidget.init(rawValue:)) ?? .timer
         systemMetrics = Set((defaults.stringArray(forKey: Key.systemMetrics)
             ?? SystemMetric.allCases.map(\.rawValue)).compactMap(SystemMetric.init(rawValue:)))
+        alerts = Set(AlertKind.allCases).subtracting(
+            (defaults.stringArray(forKey: Key.alertsOff) ?? Self.defaultAlertsOff)
+                .compactMap(AlertKind.init(rawValue:)))
         glowFollowsMedia = defaults.object(forKey: Key.glowFollowsMedia) as? Bool ?? true
         statusIcons = Set((defaults.stringArray(forKey: Key.statusIcons)
             ?? StatusIcon.allCases.map(\.rawValue)).compactMap(StatusIcon.init(rawValue:)))
@@ -316,6 +335,9 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode([GlowColor].self, from: $0) }
         customGlowColors = storedColors.flatMap { $0.count >= 2 ? $0 : nil } ?? Self.defaultCustomColors
     }
+
+    /// macOS already shows its own overlay for these two, so the island stays quiet by default.
+    private static let defaultAlertsOff = [AlertKind.volume, .brightness].map(\.rawValue)
 
     static let defaultCustomColors: [GlowColor] = [
         GlowColor(red: 0.36, green: 0.95, blue: 0.85),
