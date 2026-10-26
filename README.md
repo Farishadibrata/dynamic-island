@@ -8,7 +8,7 @@ A Dynamic Island for the MacBook notch. It sits in the notch as a small pill, an
 
 ## Features
 
-- **Now playing** from Music and Spotify: cover, title, artist, elapsed and total time, and level bars. A new song opens the island briefly with a short reveal.
+- **Now playing** from Music and Spotify: cover, title, artist, elapsed and total time, and the icon of the app playing it. A new song opens the island briefly with a short reveal.
 - **Glow** around the island that takes its colours from the album cover. Pick a palette, or set your own.
 - **Song progress**: the Song motion turns the glow into a progress line that hugs the island's edge and follows seeking.
 - **Widgets** in the expanded island, two slots you choose: Calendar, Reminders, Focus timer, Clock, Battery, Discord mute.
@@ -17,6 +17,12 @@ A Dynamic Island for the MacBook notch. It sits in the notch as a small pill, an
 - **Small state slots** either side of the notch: now playing, CPU, memory, disk or battery.
 - **Live alerts**: the island widens for a moment when the charger goes in or out, the battery runs low or is full, the volume changes, a Bluetooth device connects, or the focus timer ends. Each can be switched off.
 - Follows a three-finger swipe between desktops.
+
+## A new song
+
+When a new song starts, the island opens on its own for a few seconds: the cover springs in, the title and artist follow, and the progress line starts to fill.
+
+![A new song opening the island](docs/screenshots/new-song.gif)
 
 ## Settings
 
@@ -52,7 +58,6 @@ The app asks only for what a feature needs, when you use it:
 
 - Builds are ad-hoc signed by default, so macOS treats every rebuild as a new app and Accessibility has to be granted again. To keep it, pick your own team under Signing & Capabilities in Xcode (a free Apple ID works).
 - Following desktop swipes uses private macOS space calls (`CGSAddWindowsToSpaces` and related). They may change in a future macOS release; if they go missing the island stays on its current desktop.
-- macOS does not give apps audio levels, so the level bars are animated by a clock and do not react to the sound.
 
 ## License
 

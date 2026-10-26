@@ -38,14 +38,7 @@ struct NowPlayingView: View {
 
                 Spacer(minLength: 0)
 
-                VisualizerBars(isPlaying: track.isPlaying,
-                               isActive: isActive,
-                               barCount: 5,
-                               barWidth: 3,
-                               spacing: 2.5,
-                               maxHeight: 22,
-                               color: tint)
-                    .frame(height: 24)
+                SourceIcon(track: track, side: 24)
                     .reveal(revealed, delay: 0.26)
             }
 

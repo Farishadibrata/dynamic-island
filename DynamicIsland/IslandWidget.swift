@@ -102,6 +102,9 @@ final class AgendaService: ObservableObject {
     }
 
     func requestCalendar() {
+        // An accessory app is never frontmost by itself, and the system only shows the
+        // permission dialog for an app that is.
+        NSApp.activate(ignoringOtherApps: true)
         Task {
             _ = try? await store.requestFullAccessToEvents()
             refresh()
@@ -109,6 +112,9 @@ final class AgendaService: ObservableObject {
     }
 
     func requestReminders() {
+        // An accessory app is never frontmost by itself, and the system only shows the
+        // permission dialog for an app that is.
+        NSApp.activate(ignoringOtherApps: true)
         Task {
             _ = try? await store.requestFullAccessToReminders()
             refresh()

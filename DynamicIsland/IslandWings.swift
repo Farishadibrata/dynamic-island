@@ -32,7 +32,9 @@ struct IslandWing: View {
     private var nowPlayingWing: some View {
         HStack(spacing: 9) {
             artwork
-            VisualizerBars(isPlaying: nowPlaying.track?.isPlaying ?? false, isActive: isActive)
+            if let track = nowPlaying.track {
+                SourceIcon(track: track, side: 16)
+            }
         }
     }
 
@@ -91,40 +93,36 @@ struct IslandWing: View {
     }
 }
 
-/// Level bars beside the collapsed artwork.
-///
-/// macOS hands third-party apps no audio levels — `MediaRemote` is closed off, and capturing
-/// the output device needs a kernel extension — so these are shaped by the clock instead of
-/// by the sound. They move while something is playing and rest when it is paused.
-struct VisualizerBars: View {
-    let isPlaying: Bool
-    let isActive: Bool
-    var barCount = 4
-    var barWidth: CGFloat = 2
-    var spacing: CGFloat = 2
-    var maxHeight: CGFloat = 14
-    var color: Color = .white
+/// The icon of the app the music is coming from, beside the cover. It dims while paused.
+struct SourceIcon: View {
+    let track: NowPlayingTrack
+    var side: CGFloat = 16
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying || !isActive)) { context in
-            HStack(alignment: .center, spacing: spacing) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    Capsule()
-                        .fill(color.opacity(0.85))
-                        .frame(width: barWidth, height: height(at: context.date, index: index))
-                }
-            }
+        if let image = Self.icon(for: track.sourceID) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: side, height: side)
+                .opacity(track.isPlaying ? 1 : 0.45)
+                .animation(.easeOut(duration: 0.2), value: track.isPlaying)
+        } else {
+            Image(systemName: "music.note")
+                .font(.system(size: side * 0.7, weight: .semibold))
+                .foregroundStyle(.white.opacity(track.isPlaying ? 0.8 : 0.4))
         }
     }
 
-    private func height(at date: Date, index: Int) -> CGFloat {
-        let rest = barWidth + 1
-        guard isPlaying else { return rest }
+    private static var cache: [String: NSImage] = [:]
 
-        // Two out-of-step waves per bar keep the group from marching in unison.
-        let time = date.timeIntervalSinceReferenceDate
-        let phase = Double(index) * 1.9
-        let wave = (sin(time * 6.1 + phase) + sin(time * 2.3 + phase * 1.4) + 2) / 4
-        return rest + (maxHeight - rest) * CGFloat(wave)
+    private static func icon(for sourceID: String) -> NSImage? {
+        if let cached = cache[sourceID] { return cached }
+        guard let source = NowPlayingSource(rawValue: sourceID),
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: source.bundleID) else {
+            return nil
+        }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        cache[sourceID] = image
+        return image
     }
 }
