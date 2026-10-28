@@ -228,7 +228,8 @@ struct IslandContentView: View {
                            style: settings.glowStyle,
                            intensity: settings.innerGlowIntensity,
                            speed: settings.glowSpeed,
-                           shape: notchShape)
+                           shape: notchShape,
+                           isVisible: showsInnerGlow)
                 .frame(width: state.notchSize.width, height: state.notchSize.height)
 
             notchShape

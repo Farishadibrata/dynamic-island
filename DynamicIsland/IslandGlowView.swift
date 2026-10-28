@@ -23,6 +23,9 @@ struct IslandGlowView: View {
     let shape: UnevenRoundedRectangle
     /// Used by the `.progress` style; without it that style falls back to the comet.
     var progress: GlowProgress?
+    /// False while the glow is faded out, so the timeline stops rather than drawing frames
+    /// nobody sees.
+    var isVisible = true
 
     /// The reported position only updates every so often, so the line runs ahead of it on
     /// the clock between updates and snaps to the next report.
@@ -32,11 +35,14 @@ struct IslandGlowView: View {
     /// Where the comet's fade-in starts, as a fraction of a lap. The rest is tail.
     private let tailStart = 0.55
 
+    /// Room around the frame for the blur, since `drawingGroup` clips to its bounds.
+    private let bleed: CGFloat = 48
+
     var body: some View {
         if effect == .off || colors.isEmpty {
             Color.clear
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !effect.animates)) { context in
+            TimelineView(.animation(minimumInterval: frameInterval, paused: isPaused)) { context in
                 GeometryReader { proxy in
                     if let fraction = songFraction(at: context.date) {
                         progressLine(fraction, size: proxy.size)
@@ -44,11 +50,34 @@ struct IslandGlowView: View {
                         orbit(angle: GlowPalette.angle(at: context.date, effect: effect, speed: speed))
                     }
                 }
+                // Rendered on the GPU: drawn by Core Graphics, the blurred gradients cost
+                // a large slice of a CPU core at 30 fps.
+                .padding(bleed)
+                .drawingGroup()
+                .padding(-bleed)
             }
             .allowsHitTesting(false)
             .onAppear { anchor(to: progress?.position) }
             .onChange(of: progress?.position) { _, position in anchor(to: position) }
         }
+    }
+
+    // MARK: Frame rate
+
+    private var followsSong: Bool {
+        style == .progress && (progress?.duration ?? 0) > 1
+    }
+
+    /// A paused song leaves the line still, so there is nothing to redraw.
+    private var isPaused: Bool {
+        !effect.animates || !isVisible || (followsSong && progress?.isPlaying != true)
+    }
+
+    /// The comet needs a smooth 30 fps. The song line creeps along a few hundred points over
+    /// the whole track, so it redraws about once per point of travel instead.
+    private var frameInterval: Double {
+        guard followsSong, let progress else { return 1.0 / 30.0 }
+        return min(max(progress.duration / 600, 1.0 / 30.0), 0.5)
     }
 
     // MARK: Orbiting comet
